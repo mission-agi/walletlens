@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Household {
+  id        String   @id @default(cuid())
+  name      String   @default("My Household")
+  createdAt DateTime @default(now())
+  users     User[]
+}
+
+model User {
+  id          String    @id @default(cuid())
+  name        String
+  avatarColor String    @default("#3b82f6")
+  householdId String
+  createdAt   DateTime  @default(now())
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  accounts    Account[]
+
+  @@index([householdId])
+}
+
+model Account {
+  id         String      @id @default(cuid())
+  name       String
+  bankName   String
+  type       String      @default("checking")
+  userId     String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  user       User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  statements Statement[]
+  holdings   Holding[]
+
+  @@index([userId])
+}
+
+model Statement {
+  id                     String                  @id @default(cuid())
+  accountId              String
+  filename               String
+  uploadDate             DateTime                @default(now())
+  periodStart            DateTime?
+  periodEnd              DateTime?
+  account                Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  transactions           Transaction[]
+  investmentTransactions InvestmentTransaction[]
+
+  @@index([accountId])
+}
+
+model Transaction {
+  id                  String    @id @default(cuid())
+  statementId         String
+  date                DateTime
+  description         String
+  originalDescription String
+  amount              Float
+  type                String
+  category            String    @default("Uncategorized")
+  statement           Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId])
+  @@index([date])
+  @@index([category])
+}
+
+model InvestmentTransaction {
+  id            String    @id @default(cuid())
+  statementId   String
+  date          DateTime
+  action        String
+  symbol        String
+  description   String
+  shares        Float     @default(0)
+  pricePerShare Float     @default(0)
+  amount        Float
+  statement     Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId])
+  @@index([date])
+  @@index([symbol])
+}
+
+model Holding {
+  id           String   @id @default(cuid())
+  accountId    String
+  symbol       String
+  name         String   @default("")
+  shares       Float
+  costBasis    Float
+  currentPrice Float    @default(0)
+  currentValue Float    @default(0)
+  lastUpdated  DateTime @default(now())
+  account      Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, symbol])
+  @@index([accountId])
+}
+
+model Category {
+  id       String @id @default(cuid())
+  name     String @unique
+  keywords String
+  color    String
+  icon     String
+}
