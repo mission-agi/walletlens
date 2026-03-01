@@ -398,29 +398,38 @@ export async function parsePDFWithMetadata(
   buffer: Buffer,
   fallbackFilename?: string,
 ): Promise<ParsedResult> {
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
-  const textResult = await parser.getText();
-  const text = textResult.text;
-  await parser.destroy();
+  try {
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const textResult = await parser.getText();
+    const text = textResult.text;
+    await parser.destroy();
 
-  const bankName = detectBank(text);
-  const accountLabel =
-    bankName !== "Unknown Bank"
-      ? detectAccountLabel(text, bankName)
-      : fallbackFilename
-        ? fallbackFilename.replace(/\.[^.]+$/, "")
-        : "Unknown Account";
+    const bankName = detectBank(text);
+    const accountLabel =
+      bankName !== "Unknown Bank"
+        ? detectAccountLabel(text, bankName)
+        : fallbackFilename
+          ? fallbackFilename.replace(/\.[^.]+$/, "")
+          : "Unknown Account";
 
-  if (!isBankStatement(text)) {
+    if (!isBankStatement(text)) {
+      return {
+        transactions: [],
+        bankName,
+        accountLabel,
+        failedRows: [{ rowIndex: -1, rawContent: "", reasonCode: "not_a_bank_statement", reasonMessage: "PDF does not appear to be a bank statement" }],
+      };
+    }
+
+    const { successfulRows: transactions, failedRows } = parseTransactionsFromText(text);
+
+    return { transactions, bankName, accountLabel, failedRows };
+  } catch (err) {
     return {
       transactions: [],
-      bankName,
-      accountLabel,
-      failedRows: [{ rowIndex: -1, rawContent: "", reasonCode: "not_a_bank_statement", reasonMessage: "PDF does not appear to be a bank statement" }],
+      bankName: "Unknown Bank",
+      accountLabel: fallbackFilename?.replace(/\.[^.]+$/, "") || "Unknown Account",
+      failedRows: [{ rowIndex: -1, rawContent: "", reasonCode: "parser_crash", reasonMessage: err instanceof Error ? err.message : "Unknown error" }],
     };
   }
-
-  const { successfulRows: transactions, failedRows } = parseTransactionsFromText(text);
-
-  return { transactions, bankName, accountLabel, failedRows };
 }

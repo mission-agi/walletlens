@@ -17,7 +17,7 @@ const SaveTransactionsSchema = z.object({
   accountId: z.string().max(100).optional(),
   bankName: z.string().max(200).optional(),
   accountLabel: z.string().max(200).optional(),
-  accountType: z.string().max(50).optional(),
+  accountType: z.enum(["checking", "savings", "credit", "brokerage", "retirement_401k", "ira"]).optional(),
   filename: z.string().max(500),
   transactions: z.array(
     z.object({
@@ -169,8 +169,14 @@ export const GET = withLogging(async function GET(request: Request) {
   }
   if (from || to) {
     where.date = {};
-    if (from) where.date.gte = new Date(from);
-    if (to) where.date.lte = new Date(to);
+    if (from) {
+      const fromDate = new Date(from);
+      if (!isNaN(fromDate.getTime())) where.date.gte = fromDate;
+    }
+    if (to) {
+      const toDate = new Date(to);
+      if (!isNaN(toDate.getTime())) where.date.lte = toDate;
+    }
   }
 
   const [transactions, total] = await Promise.all([

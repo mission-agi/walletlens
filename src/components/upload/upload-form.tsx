@@ -45,7 +45,6 @@ interface FileMeta {
 
 interface Props {
   categories: { id: string; name: string; color: string }[];
-  userId?: string;
 }
 
 const ACTION_COLORS: Record<string, string> = {
@@ -73,7 +72,7 @@ const REASON_LABELS: Record<string, { label: string; color: string }> = {
   parser_crash: { label: "Parser error", color: "#ef4444" },
 };
 
-export function UploadForm({ categories, userId }: Props) {
+export function UploadForm({ categories }: Props) {
   const [files, setFiles] = useState<File[]>([]);
   const [transactions, setTransactions] = useState<CategorizedTransaction[]>([]);
   const [investmentTransactions, setInvestmentTransactions] = useState<InvestmentTransaction[]>([]);
@@ -299,7 +298,7 @@ export function UploadForm({ categories, userId }: Props) {
                   accountLabel: meta.accountLabel,
                   accountType: meta.accountType || "brokerage",
                   filename: meta.filename,
-                  userId,
+
                   transactions: batch,
                 }),
               });
@@ -329,7 +328,7 @@ export function UploadForm({ categories, userId }: Props) {
                   bankName: meta.bankName,
                   accountLabel: meta.accountLabel,
                   filename: meta.filename,
-                  userId,
+
                   transactions: batch,
                 }),
               });

@@ -118,8 +118,9 @@ export async function verifyAccountAccess(
     return accountUser?.householdId === auth.householdId;
   }
 
-  // Unassigned accounts are accessible (legacy data)
-  return true;
+  // Unassigned accounts (userId is null) are NOT accessible
+  // This prevents cross-household access to orphaned/legacy data
+  return false;
 }
 
 /**
@@ -158,7 +159,8 @@ export async function verifyStatementAccess(
     return accountUser?.householdId === auth.householdId;
   }
 
-  return true;
+  // Unassigned statement accounts are NOT accessible
+  return false;
 }
 
 /**
@@ -187,7 +189,8 @@ export async function verifyTransactionAccess(
     return accountUser?.householdId === auth.householdId;
   }
 
-  return true;
+  // Unassigned transaction accounts are NOT accessible
+  return false;
 }
 
 // ─── Rate Limiting (In-Memory) ───────────────────────────────────────────────

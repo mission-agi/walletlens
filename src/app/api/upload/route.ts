@@ -4,6 +4,7 @@ import { parsePDFWithMetadata } from "@/lib/parsers/pdf-parser";
 import { isInvestmentCSV, parseInvestmentCSVWithMetadata } from "@/lib/parsers/investment-csv-parser";
 import { isInvestmentPDF, parseInvestmentPDFWithMetadata } from "@/lib/parsers/investment-pdf-parser";
 import { categorizeTransactions } from "@/lib/categorizer";
+import { prisma } from "@/lib/db";
 import {
   requireAuth,
   checkRateLimit,
@@ -12,6 +13,20 @@ import {
   auditLog,
 } from "@/lib/security";
 import { withLogging } from "@/lib/api-logger";
+
+// Module-level category cache to avoid repeated DB queries during bulk uploads
+let categoryCache: { id: string; name: string; keywords: string }[] | null = null;
+let categoryCacheTime = 0;
+const CACHE_TTL_MS = 60 * 1000; // 1 minute
+
+async function getCachedCategories() {
+  const now = Date.now();
+  if (!categoryCache || now - categoryCacheTime > CACHE_TTL_MS) {
+    categoryCache = await prisma.category.findMany();
+    categoryCacheTime = now;
+  }
+  return categoryCache;
+}
 
 export const POST = withLogging(async function POST(request: Request) {
   const rateLimited = checkRateLimit(request, "file-upload", 200, 60 * 1000);
@@ -64,8 +79,9 @@ export const POST = withLogging(async function POST(request: Request) {
     if (parsed.transactions.length === 0 && (!parsed.failedRows || parsed.failedRows.length === 0)) {
       return safeError("No transactions found in the file.");
     }
+    const categories = await getCachedCategories();
     const categorized = parsed.transactions.length > 0
-      ? await categorizeTransactions(parsed.transactions)
+      ? await categorizeTransactions(parsed.transactions, categories)
       : [];
     return NextResponse.json({
       isInvestment: false,
@@ -100,8 +116,9 @@ export const POST = withLogging(async function POST(request: Request) {
     if (parsed.transactions.length === 0 && (!parsed.failedRows || parsed.failedRows.length === 0)) {
       return safeError("No transactions found in the file.");
     }
+    const pdfCategories = await getCachedCategories();
     const categorized = parsed.transactions.length > 0
-      ? await categorizeTransactions(parsed.transactions)
+      ? await categorizeTransactions(parsed.transactions, pdfCategories)
       : [];
     return NextResponse.json({
       isInvestment: false,

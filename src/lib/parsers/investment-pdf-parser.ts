@@ -133,12 +133,18 @@ export async function isInvestmentPDF(buffer: Buffer): Promise<boolean> {
 }
 
 // Parse investment PDF (best-effort line-by-line extraction)
-export async function parsePDFInvestmentTransactions(buffer: Buffer): Promise<ParseResult<ParsedInvestmentTransaction>> {
+// Accepts optional pre-extracted text to avoid re-parsing the PDF
+export async function parsePDFInvestmentTransactions(buffer: Buffer, preExtractedText?: string): Promise<ParseResult<ParsedInvestmentTransaction>> {
   try {
-    const parser = new PDFParse({ data: new Uint8Array(buffer) });
-    const textResult = await parser.getText();
-    const text = textResult.text;
-    await parser.destroy();
+    let text: string;
+    if (preExtractedText !== undefined) {
+      text = preExtractedText;
+    } else {
+      const parser = new PDFParse({ data: new Uint8Array(buffer) });
+      const textResult = await parser.getText();
+      text = textResult.text;
+      await parser.destroy();
+    }
 
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
     const transactions: ParsedInvestmentTransaction[] = [];
@@ -221,7 +227,8 @@ export async function parseInvestmentPDFWithMetadata(
 
   const bankName = detectBank(text);
   const accountType = detectAccountType(text);
-  const { successfulRows: transactions, failedRows } = await parsePDFInvestmentTransactions(buffer);
+  // Pass pre-extracted text to avoid re-parsing the PDF
+  const { successfulRows: transactions, failedRows } = await parsePDFInvestmentTransactions(buffer, text);
 
   let accountLabel = bankName !== "Unknown Brokerage"
     ? `${bankName} ${accountType === "retirement_401k" ? "401(k)" : accountType === "ira" ? "IRA" : "Brokerage"}`

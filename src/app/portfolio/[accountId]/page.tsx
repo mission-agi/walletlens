@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getAccountById } from "@/lib/queries/accounts";
+import { getActiveUser } from "@/lib/active-user";
 import {
   getHoldingsForAccount,
   getInvestmentTransactions,
@@ -31,7 +32,8 @@ export default async function PortfolioAccountPage({
   const search = await searchParams;
   const page = parseInt(search.page || "1");
 
-  const account = await getAccountById(accountId);
+  const activeUser = await getActiveUser();
+  const account = await getAccountById(accountId, activeUser?.householdId);
   if (!account) notFound();
 
   const [holdings, txResult] = await Promise.all([

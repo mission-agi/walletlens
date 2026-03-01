@@ -38,8 +38,14 @@ export const GET = withLogging(async function GET(request: Request) {
   }
   if (from || to) {
     where.date = {};
-    if (from) where.date.gte = new Date(from);
-    if (to) where.date.lte = new Date(to);
+    if (from) {
+      const fromDate = new Date(from);
+      if (!isNaN(fromDate.getTime())) where.date.gte = fromDate;
+    }
+    if (to) {
+      const toDate = new Date(to);
+      if (!isNaN(toDate.getTime())) where.date.lte = toDate;
+    }
   }
 
   const transactions = await prisma.transaction.findMany({
@@ -79,10 +85,13 @@ export const GET = withLogging(async function GET(request: Request) {
   const csv = [header, ...rows].join("\n");
   const filename = `transactions-${new Date().toISOString().split("T")[0]}.csv`;
 
+  // RFC 5987 encoded filename for proper Unicode/special char support
+  const encodedFilename = encodeURIComponent(filename);
+
   return new NextResponse(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": `attachment; filename="${filename}"; filename*=UTF-8''${encodedFilename}`,
     },
   });
 });

@@ -10,10 +10,11 @@ export async function getAccounts(userId?: string) {
   });
 }
 
-export async function getAccountById(id: string) {
-  return prisma.account.findUnique({
+export async function getAccountById(id: string, householdId?: string) {
+  const account = await prisma.account.findUnique({
     where: { id },
     include: {
+      user: householdId ? { select: { householdId: true } } : false,
       statements: {
         include: {
           _count: { select: { transactions: true, investmentTransactions: true } },
@@ -22,4 +23,14 @@ export async function getAccountById(id: string) {
       },
     },
   });
+
+  // If householdId is provided, verify the account belongs to that household
+  if (account && householdId) {
+    const accountUser = account.user as { householdId: string } | null;
+    if (!accountUser || accountUser.householdId !== householdId) {
+      return null; // Access denied — account belongs to different household
+    }
+  }
+
+  return account;
 }

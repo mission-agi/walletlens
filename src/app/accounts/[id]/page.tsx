@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getAccountById } from "@/lib/queries/accounts";
+import { getActiveUser } from "@/lib/active-user";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -15,7 +16,8 @@ export default async function AccountDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const account = await getAccountById(id);
+  const activeUser = await getActiveUser();
+  const account = await getAccountById(id, activeUser?.householdId);
   if (!account) notFound();
 
   return (

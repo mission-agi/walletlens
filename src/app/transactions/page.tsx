@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/db";
 import { getFilteredTransactions } from "@/lib/queries/transactions";
 import { getAccounts } from "@/lib/queries/accounts";
-import { getActiveUserId } from "@/lib/active-user";
+import { getActiveUser } from "@/lib/active-user";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TransactionFilters } from "@/components/transactions/transaction-filters";
@@ -16,7 +16,9 @@ export default async function TransactionsPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const params = await searchParams;
-  const userId = await getActiveUserId() || undefined;
+  const activeUser = await getActiveUser();
+  const userId = activeUser?.id;
+  const householdId = activeUser?.householdId;
   const page = parseInt(params.page || "1");
   const category = params.category || undefined;
   const accountId = params.account || undefined;
@@ -25,7 +27,7 @@ export default async function TransactionsPage({
   const to = params.to || undefined;
 
   const [result, accounts, categories] = await Promise.all([
-    getFilteredTransactions({ page, category, accountId, search, from, to, userId }),
+    getFilteredTransactions({ page, category, accountId, search, from, to, userId, householdId }),
     getAccounts(userId),
     prisma.category.findMany({ orderBy: { name: "asc" } }),
   ]);

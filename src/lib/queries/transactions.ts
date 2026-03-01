@@ -8,8 +8,9 @@ export async function getFilteredTransactions(params: {
   from?: string;
   to?: string;
   userId?: string;
+  householdId?: string;
 }) {
-  const { page = 1, category, accountId, search, from, to, userId } = params;
+  const { page = 1, category, accountId, search, from, to, userId, householdId } = params;
   const limit = 20;
   const skip = (page - 1) * limit;
 
@@ -17,10 +18,14 @@ export async function getFilteredTransactions(params: {
   if (category) where.category = category;
   if (search) where.description = { contains: search };
 
-  // Build statement filter — always scope by userId when available
+  // Build statement filter — always scope by household for data isolation
   const stmtFilter: Record<string, unknown> = {};
   if (accountId) stmtFilter.accountId = accountId;
-  if (userId) stmtFilter.account = { userId };
+  if (householdId) {
+    stmtFilter.account = { user: { householdId } };
+  } else if (userId) {
+    stmtFilter.account = { userId };
+  }
   if (Object.keys(stmtFilter).length > 0) {
     where.statement = stmtFilter;
   }

@@ -51,10 +51,16 @@ export async function recomputeHoldings(accountId: string) {
     bySymbol.set(tx.symbol, current);
   }
 
-  // Delete existing holdings and recreate
-  await prisma.holding.deleteMany({ where: { accountId } });
-
-  const holdings = [];
+  // Build new holdings list
+  const holdings: {
+    accountId: string;
+    symbol: string;
+    name: string;
+    shares: number;
+    costBasis: number;
+    currentPrice: number;
+    currentValue: number;
+  }[] = [];
   for (const [symbol, data] of bySymbol) {
     if (data.shares <= 0.0001) continue; // Skip sold-out positions
 
@@ -70,9 +76,13 @@ export async function recomputeHoldings(accountId: string) {
     });
   }
 
-  if (holdings.length > 0) {
-    await prisma.holding.createMany({ data: holdings });
-  }
+  // Atomically delete + recreate holdings in a single transaction
+  await prisma.$transaction(async (tx) => {
+    await tx.holding.deleteMany({ where: { accountId } });
+    if (holdings.length > 0) {
+      await tx.holding.createMany({ data: holdings });
+    }
+  });
 
   return holdings;
 }

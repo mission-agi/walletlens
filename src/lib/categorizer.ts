@@ -37,9 +37,10 @@ const SPECIAL_RULES: { pattern: RegExp; category: string }[] = [
 ];
 
 export async function categorizeTransactions(
-  transactions: ParsedTransaction[]
+  transactions: ParsedTransaction[],
+  cachedCategories?: { id: string; name: string; keywords: string }[],
 ): Promise<CategorizedTransaction[]> {
-  const categories = await prisma.category.findMany();
+  const categories = cachedCategories || await prisma.category.findMany();
 
   const rules = categories
     .filter((c) => c.name !== "Uncategorized")
