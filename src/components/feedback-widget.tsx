@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import html2canvas from "html2canvas";
 import Image from "next/image";
 import { AlertTriangle, Bug, Camera, ExternalLink, Terminal } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
@@ -171,7 +172,7 @@ export function FeedbackWidget() {
   }, [open]);
 
   const repoConfigured = FEEDBACK_REPO.trim().length > 0;
-  const canSubmit = Boolean(description.trim()) && Boolean(screenshot) && repoConfigured && !isSubmitting;
+  const canSubmit = Boolean(description.trim()) && repoConfigured && !isSubmitting;
 
   const logsLineCount = bufferedLogCount;
 
@@ -180,6 +181,7 @@ export function FeedbackWidget() {
     setNotice(null);
     setIsCapturing(true);
 
+    // For testing: allow mock screenshot data URL
     if (typeof window !== "undefined" && window.__walletlensFeedbackMockScreenshotDataUrl) {
       try {
         const now = new Date();
@@ -200,49 +202,19 @@ export function FeedbackWidget() {
       return;
     }
 
-    let stream: MediaStream | null = null;
-
     try {
-      if (!navigator.mediaDevices?.getDisplayMedia) {
-        throw new Error("Screen capture is not supported in this browser.");
-      }
+      // Temporarily close the modal so it doesn't appear in the screenshot
+      setOpen(false);
+      // Wait for the modal close animation and DOM repaint
+      await new Promise((resolve) => setTimeout(resolve, 350));
 
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
+      const canvas = await html2canvas(document.body, {
+        useCORS: true,
+        scale: window.devicePixelRatio || 1,
+        logging: false,
+        ignoreElements: (element) =>
+          element.hasAttribute("data-feedback-trigger"),
       });
-
-      const videoTrack = stream.getVideoTracks()[0];
-      if (!videoTrack) {
-        throw new Error("No video track was returned.");
-      }
-
-      const video = document.createElement("video");
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-
-      await video.play();
-      await new Promise((resolve) => {
-        setTimeout(resolve, 250);
-      });
-
-      const settings = videoTrack.getSettings();
-      const width = settings.width ?? video.videoWidth;
-      const height = settings.height ?? video.videoHeight;
-      if (!width || !height) {
-        throw new Error("Could not determine screenshot dimensions.");
-      }
-
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const context = canvas.getContext("2d");
-      if (!context) {
-        throw new Error("Could not initialize screenshot canvas.");
-      }
-
-      context.drawImage(video, 0, 0, width, height);
 
       const blob = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob(
@@ -266,17 +238,14 @@ export function FeedbackWidget() {
         filename,
         capturedAt: now.toISOString(),
       });
-      setNotice("Screenshot captured.");
+      setNotice("Screenshot recaptured.");
+      setOpen(true);
     } catch (captureError) {
-      if (captureError instanceof DOMException && captureError.name === "NotAllowedError") {
-        setError("Screen capture was cancelled. Please allow capture to continue.");
-      } else {
-        const message =
-          captureError instanceof Error ? captureError.message : "Failed to capture screenshot.";
-        setError(message);
-      }
+      const message =
+        captureError instanceof Error ? captureError.message : "Failed to capture screenshot.";
+      setError(message);
+      setOpen(true);
     } finally {
-      stream?.getTracks().forEach((track) => track.stop());
       setIsCapturing(false);
     }
   }
@@ -295,11 +264,6 @@ export function FeedbackWidget() {
       return;
     }
 
-    if (!screenshot) {
-      setError("Capture a screenshot before creating the GitHub issue.");
-      return;
-    }
-
     setIsSubmitting(true);
 
     try {
@@ -311,16 +275,22 @@ export function FeedbackWidget() {
         .map((entry) => `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`)
         .join("\n");
 
+      const screenshotSection = screenshot
+        ? [
+            "## Screenshot",
+            "A screenshot was captured locally from WalletLens.",
+            "- Paste with Cmd/Ctrl + V in this issue form.",
+            `- If paste is blocked, attach file: \`${screenshot.filename}\`.`,
+            `- Captured at: ${screenshot.capturedAt}`,
+          ]
+        : ["## Screenshot", "_No screenshot was captured._"];
+
       const body = truncate(
         [
           "## Description",
           description.trim(),
           "",
-          "## Screenshot",
-          "A screenshot was captured locally from WalletLens.",
-          "- Paste with Cmd/Ctrl + V in this issue form.",
-          `- If paste is blocked, attach file: \`${screenshot.filename}\`.`,
-          `- Captured at: ${screenshot.capturedAt}`,
+          ...screenshotSection,
           "",
           "## Environment",
           `- URL: ${window.location.href}`,
@@ -340,9 +310,15 @@ export function FeedbackWidget() {
       issueUrl.searchParams.set("labels", "bug,feedback");
       issueUrl.searchParams.set("body", body);
 
-      const copied = await copyToClipboard(screenshot.blob);
-      if (!copied) {
-        downloadBlob(screenshot.blob, screenshot.filename);
+      let clipboardNotice = "";
+      if (screenshot) {
+        const copied = await copyToClipboard(screenshot.blob);
+        if (!copied) {
+          downloadBlob(screenshot.blob, screenshot.filename);
+          clipboardNotice = ` Screenshot downloaded as ${screenshot.filename}; attach it to the issue.`;
+        } else {
+          clipboardNotice = " Screenshot is in your clipboard; paste it into the issue.";
+        }
       }
 
       if (issueTab) {
@@ -351,11 +327,7 @@ export function FeedbackWidget() {
         window.open(issueUrl.toString(), "_blank", "noopener,noreferrer");
       }
 
-      setNotice(
-        copied
-          ? "GitHub issue opened. Screenshot is in your clipboard; paste it into the issue."
-          : `GitHub issue opened. Screenshot downloaded as ${screenshot.filename}; attach it to the issue.`
-      );
+      setNotice(`GitHub issue opened.${clipboardNotice}`);
     } catch (submitError) {
       const message =
         submitError instanceof Error ? submitError.message : "Failed to open GitHub issue.";
@@ -369,8 +341,8 @@ export function FeedbackWidget() {
     <>
       <button
         type="button"
-        onClick={() => {
-          setOpen(true);
+        data-feedback-trigger
+        onClick={async () => {
           setError(null);
           setNotice(null);
           if (typeof window !== "undefined") {
@@ -378,6 +350,45 @@ export function FeedbackWidget() {
             setBufferedLogCount(entries.length);
             setLogPreview(entries.slice(-10));
           }
+          // Auto-capture screenshot before opening the modal
+          if (!screenshot) {
+            setIsCapturing(true);
+            try {
+              const canvas = await html2canvas(document.body, {
+                useCORS: true,
+                scale: window.devicePixelRatio || 1,
+                logging: false,
+                ignoreElements: (element) =>
+                  element.hasAttribute("data-feedback-trigger"),
+              });
+              const blob = await new Promise<Blob>((resolve, reject) => {
+                canvas.toBlob(
+                  (result) => {
+                    if (!result) {
+                      reject(new Error("Failed to create screenshot image."));
+                      return;
+                    }
+                    resolve(result);
+                  },
+                  "image/png",
+                  1
+                );
+              });
+              const now = new Date();
+              const filename = `walletlens-feedback-${now.toISOString().replace(/[:.]/g, "-")}.png`;
+              setScreenshot({
+                blob,
+                dataUrl: canvas.toDataURL("image/png"),
+                filename,
+                capturedAt: now.toISOString(),
+              });
+            } catch {
+              // Silently fail — user can still manually capture
+            } finally {
+              setIsCapturing(false);
+            }
+          }
+          setOpen(true);
         }}
         className="fixed bottom-20 left-4 z-[60] inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-2 text-[13px] font-medium text-foreground shadow-[0_8px_24px_rgba(0,0,0,0.16)] hover:bg-muted md:bottom-6 md:left-6"
       >
@@ -426,7 +437,7 @@ export function FeedbackWidget() {
               />
             ) : (
               <p className="text-[12px] text-muted-foreground">
-                Capture the current screen before creating the issue.
+                Click Capture to include a screenshot (optional).
               </p>
             )}
           </div>
