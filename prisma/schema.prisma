@@ -111,3 +111,8 @@ model Category {
   color    String
   icon     String
 }
+
+model AppConfig {
+  key   String @id
+  value String
+}

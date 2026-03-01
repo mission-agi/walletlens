@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import html2canvas from "html2canvas";
 import Image from "next/image";
-import { AlertTriangle, Bug, Camera, ExternalLink, Terminal } from "lucide-react";
+import { AlertTriangle, Bug, Camera, CheckCircle, Loader2, Send, Terminal } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 
@@ -16,15 +16,12 @@ interface ConsoleEntry {
 }
 
 interface ScreenshotCapture {
-  blob: Blob;
   dataUrl: string;
-  filename: string;
   capturedAt: string;
 }
 
 const MAX_BUFFERED_LOGS = 200;
 const MAX_INCLUDED_LOG_LINES = 80;
-const MAX_ISSUE_BODY_CHARS = 7000;
 const FEEDBACK_REPO = process.env.NEXT_PUBLIC_GITHUB_FEEDBACK_REPO ?? "";
 
 declare global {
@@ -100,54 +97,6 @@ function ensureConsoleBuffer(): ConsoleEntry[] {
   return window.__walletlensFeedbackConsoleEntries;
 }
 
-function buildIssueTitle(description: string): string {
-  const firstLine = description.trim().split("\n")[0] || "Feedback";
-  const compact = firstLine.replace(/\s+/g, " ").trim();
-  const truncated = compact.length > 90 ? `${compact.slice(0, 90)}...` : compact;
-  return `Feedback: ${truncated}`;
-}
-
-function truncate(text: string, maxLength: number): string {
-  if (text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength)}\n...[truncated]`;
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(objectUrl);
-}
-
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const response = await fetch(dataUrl);
-  if (!response.ok) {
-    throw new Error("Could not decode screenshot data URL.");
-  }
-  return response.blob();
-}
-
-async function copyToClipboard(blob: Blob): Promise<boolean> {
-  if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
-    return false;
-  }
-
-  try {
-    await navigator.clipboard.write([
-      new ClipboardItem({
-        [blob.type]: blob,
-      }),
-    ]);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function FeedbackWidget() {
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -155,7 +104,7 @@ export function FeedbackWidget() {
   const [isCapturing, setIsCapturing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [logPreview, setLogPreview] = useState<ConsoleEntry[]>([]);
   const [bufferedLogCount, setBufferedLogCount] = useState(0);
 
@@ -172,40 +121,25 @@ export function FeedbackWidget() {
   }, [open]);
 
   const repoConfigured = FEEDBACK_REPO.trim().length > 0;
-  const canSubmit = Boolean(description.trim()) && repoConfigured && !isSubmitting;
-
-  const logsLineCount = bufferedLogCount;
+  const canSubmit = Boolean(description.trim()) && repoConfigured && !isSubmitting && !success;
 
   async function captureScreenshot() {
     setError(null);
-    setNotice(null);
     setIsCapturing(true);
 
     // For testing: allow mock screenshot data URL
     if (typeof window !== "undefined" && window.__walletlensFeedbackMockScreenshotDataUrl) {
-      try {
-        const now = new Date();
-        const filename = `walletlens-feedback-${now.toISOString().replace(/[:.]/g, "-")}.png`;
-        const blob = await dataUrlToBlob(window.__walletlensFeedbackMockScreenshotDataUrl);
-        setScreenshot({
-          blob,
-          dataUrl: window.__walletlensFeedbackMockScreenshotDataUrl,
-          filename,
-          capturedAt: now.toISOString(),
-        });
-        setNotice("Screenshot captured.");
-      } catch {
-        setError("Failed to capture screenshot.");
-      } finally {
-        setIsCapturing(false);
-      }
+      setScreenshot({
+        dataUrl: window.__walletlensFeedbackMockScreenshotDataUrl,
+        capturedAt: new Date().toISOString(),
+      });
+      setIsCapturing(false);
       return;
     }
 
     try {
       // Temporarily close the modal so it doesn't appear in the screenshot
       setOpen(false);
-      // Wait for the modal close animation and DOM repaint
       await new Promise((resolve) => setTimeout(resolve, 350));
 
       const canvas = await html2canvas(document.body, {
@@ -216,29 +150,10 @@ export function FeedbackWidget() {
           element.hasAttribute("data-feedback-trigger"),
       });
 
-      const blob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (result) => {
-            if (!result) {
-              reject(new Error("Failed to create screenshot image."));
-              return;
-            }
-            resolve(result);
-          },
-          "image/png",
-          1
-        );
-      });
-
-      const now = new Date();
-      const filename = `walletlens-feedback-${now.toISOString().replace(/[:.]/g, "-")}.png`;
       setScreenshot({
-        blob,
         dataUrl: canvas.toDataURL("image/png"),
-        filename,
-        capturedAt: now.toISOString(),
+        capturedAt: new Date().toISOString(),
       });
-      setNotice("Screenshot recaptured.");
       setOpen(true);
     } catch (captureError) {
       const message =
@@ -250,87 +165,70 @@ export function FeedbackWidget() {
     }
   }
 
-  async function openGitHubIssue() {
+  async function submitFeedback() {
     setError(null);
-    setNotice(null);
-
-    if (!repoConfigured) {
-      setError("Set NEXT_PUBLIC_GITHUB_FEEDBACK_REPO (owner/repo) to enable GitHub feedback.");
-      return;
-    }
+    setSuccess(null);
 
     if (!description.trim()) {
-      setError("Add a short description before submitting feedback.");
+      setError("Please describe the issue.");
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const issueTab = window.open("about:blank", "_blank", "noopener,noreferrer");
-
+      // Gather console logs
       const buffer = ensureConsoleBuffer();
       const logs = buffer.slice(-MAX_INCLUDED_LOG_LINES);
-      const logText = logs
+      const consoleLogs = logs
         .map((entry) => `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`)
         .join("\n");
 
-      const screenshotSection = screenshot
-        ? [
-            "## Screenshot",
-            "A screenshot was captured locally from WalletLens.",
-            "- Paste with Cmd/Ctrl + V in this issue form.",
-            `- If paste is blocked, attach file: \`${screenshot.filename}\`.`,
-            `- Captured at: ${screenshot.capturedAt}`,
-          ]
-        : ["## Screenshot", "_No screenshot was captured._"];
-
-      const body = truncate(
-        [
-          "## Description",
-          description.trim(),
-          "",
-          ...screenshotSection,
-          "",
-          "## Environment",
-          `- URL: ${window.location.href}`,
-          `- User Agent: ${navigator.userAgent}`,
-          `- Timestamp: ${new Date().toISOString()}`,
-          "",
-          "## Console Logs (last entries)",
-          "```text",
-          logText || "No client console logs were captured.",
-          "```",
-        ].join("\n"),
-        MAX_ISSUE_BODY_CHARS
-      );
-
-      const issueUrl = new URL(`https://github.com/${FEEDBACK_REPO}/issues/new`);
-      issueUrl.searchParams.set("title", buildIssueTitle(description));
-      issueUrl.searchParams.set("labels", "bug,feedback");
-      issueUrl.searchParams.set("body", body);
-
-      let clipboardNotice = "";
-      if (screenshot) {
-        const copied = await copyToClipboard(screenshot.blob);
-        if (!copied) {
-          downloadBlob(screenshot.blob, screenshot.filename);
-          clipboardNotice = ` Screenshot downloaded as ${screenshot.filename}; attach it to the issue.`;
-        } else {
-          clipboardNotice = " Screenshot is in your clipboard; paste it into the issue.";
+      // Extract base64 from data URL (strip "data:image/png;base64," prefix)
+      let screenshotBase64: string | undefined;
+      if (screenshot?.dataUrl) {
+        const base64Match = screenshot.dataUrl.match(/^data:[^;]+;base64,(.+)$/);
+        if (base64Match) {
+          screenshotBase64 = base64Match[1];
         }
       }
 
-      if (issueTab) {
-        issueTab.location.href = issueUrl.toString();
-      } else {
-        window.open(issueUrl.toString(), "_blank", "noopener,noreferrer");
+      const res = await fetch("/api/feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          description: description.trim(),
+          screenshotBase64,
+          consoleLogs: consoleLogs || undefined,
+          pageUrl: window.location.href,
+          userAgent: navigator.userAgent,
+        }),
+      });
+
+      const data = (await res.json()) as {
+        success?: boolean;
+        issueUrl?: string;
+        issueNumber?: number;
+        error?: string;
+      };
+
+      if (!res.ok || !data.success) {
+        setError(data.error || "Failed to submit feedback. Please try again.");
+        return;
       }
 
-      setNotice(`GitHub issue opened.${clipboardNotice}`);
+      setSuccess(`Feedback submitted! (Issue #${data.issueNumber})`);
+
+      // Reset form after short delay
+      setTimeout(() => {
+        setDescription("");
+        setScreenshot(null);
+        setSuccess(null);
+        setOpen(false);
+      }, 2500);
     } catch (submitError) {
       const message =
-        submitError instanceof Error ? submitError.message : "Failed to open GitHub issue.";
+        submitError instanceof Error ? submitError.message : "Failed to submit feedback.";
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -344,7 +242,7 @@ export function FeedbackWidget() {
         data-feedback-trigger
         onClick={async () => {
           setError(null);
-          setNotice(null);
+          setSuccess(null);
           if (typeof window !== "undefined") {
             const entries = ensureConsoleBuffer();
             setBufferedLogCount(entries.length);
@@ -361,26 +259,9 @@ export function FeedbackWidget() {
                 ignoreElements: (element) =>
                   element.hasAttribute("data-feedback-trigger"),
               });
-              const blob = await new Promise<Blob>((resolve, reject) => {
-                canvas.toBlob(
-                  (result) => {
-                    if (!result) {
-                      reject(new Error("Failed to create screenshot image."));
-                      return;
-                    }
-                    resolve(result);
-                  },
-                  "image/png",
-                  1
-                );
-              });
-              const now = new Date();
-              const filename = `walletlens-feedback-${now.toISOString().replace(/[:.]/g, "-")}.png`;
               setScreenshot({
-                blob,
                 dataUrl: canvas.toDataURL("image/png"),
-                filename,
-                capturedAt: now.toISOString(),
+                capturedAt: new Date().toISOString(),
               });
             } catch {
               // Silently fail — user can still manually capture
@@ -390,10 +271,10 @@ export function FeedbackWidget() {
           }
           setOpen(true);
         }}
-        className="fixed bottom-20 left-4 z-[60] inline-flex items-center gap-2 rounded-full border border-border/80 bg-card px-3 py-2 text-[13px] font-medium text-foreground shadow-[0_8px_24px_rgba(0,0,0,0.16)] hover:bg-muted md:bottom-6 md:left-6"
+        className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] font-medium text-[#888] hover:text-[#ccc]"
       >
-        <Bug className="h-4 w-4" />
-        <span className="hidden sm:inline">Report bug</span>
+        <Bug className="h-[16px] w-[16px]" />
+        <span>Report Bug</span>
       </button>
 
       <Modal open={open} onClose={() => setOpen(false)} title="Send Feedback">
@@ -446,7 +327,7 @@ export function FeedbackWidget() {
             <div className="mb-2 flex items-center gap-1.5">
               <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
               <p className="text-[13px] font-medium">
-                Console logs ({logsLineCount} buffered)
+                Console logs ({bufferedLogCount} buffered)
               </p>
             </div>
             {logPreview.length === 0 ? (
@@ -473,15 +354,24 @@ export function FeedbackWidget() {
           )}
 
           {error && <p className="text-[12px] text-destructive">{error}</p>}
-          {notice && <p className="text-[12px] text-primary">{notice}</p>}
+          {success && (
+            <div className="flex items-center gap-2 text-[12px] text-primary">
+              <CheckCircle className="h-3.5 w-3.5" />
+              <p>{success}</p>
+            </div>
+          )}
 
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={openGitHubIssue} disabled={!canSubmit}>
-              <ExternalLink className="h-3.5 w-3.5" />
-              {isSubmitting ? "Opening..." : "Create GitHub Issue"}
+            <Button type="button" onClick={submitFeedback} disabled={!canSubmit}>
+              {isSubmitting ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Send className="h-3.5 w-3.5" />
+              )}
+              {isSubmitting ? "Submitting..." : "Submit Feedback"}
             </Button>
           </div>
         </div>
