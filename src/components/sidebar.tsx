@@ -10,9 +10,11 @@ import {
   TrendingUp,
   Users,
   Settings,
+  Bug,
 } from "lucide-react";
 import { NavLink } from "./nav-link";
 import { ProfileSwitcher } from "./profile/profile-switcher";
+import { FeedbackWidget } from "./feedback-widget";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -61,6 +63,9 @@ export function Sidebar({ activeUser }: { activeUser?: ActiveUser | null }) {
               {item.name}
             </NavLink>
           ))}
+          <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <FeedbackWidget />
+          </div>
         </nav>
 
         <div
