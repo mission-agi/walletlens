@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
+import { FeedbackWidget } from "@/components/feedback-widget";
 import { getActiveUser } from "@/lib/active-user";
 
 const geistSans = Geist({
@@ -48,6 +49,7 @@ export default async function RootLayout({
               {children}
             </div>
           </main>
+          <FeedbackWidget />
         </div>
       </body>
     </html>

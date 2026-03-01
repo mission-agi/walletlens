@@ -65,6 +65,7 @@ See [`.env.example`](.env.example) for all available configuration options.
 |----------|----------|---------|-------------|
 | `DATABASE_URL` | Yes | `file:./dev.db` | SQLite database path |
 | `LOG_LEVEL` | No | `debug` (dev) / `info` (prod) | Logging verbosity |
+| `NEXT_PUBLIC_GITHUB_FEEDBACK_REPO` | No | _unset_ | Target repo for in-app feedback issues (`owner/repo`) |
 
 ## Project Structure
 
