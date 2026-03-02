@@ -73,8 +73,8 @@ const BROKERAGE_CONFIGS: {
 ];
 
 // Generic header candidates for unknown brokerages
-const DATE_CANDIDATES = ["date", "trade date", "run date", "activity date", "settlement date", "transaction date"];
-const ACTION_CANDIDATES = ["action", "transaction type", "trans code", "type", "activity"];
+const DATE_CANDIDATES = ["date", "trade date", "run date", "activity date", "settlement date", "transaction date", "transactiondate"];
+const ACTION_CANDIDATES = ["action", "transaction type", "transactiontype", "trans code", "type", "activity"];
 const SYMBOL_CANDIDATES = ["symbol", "ticker", "instrument", "security"];
 const DESC_CANDIDATES = ["description", "security description", "investment name", "name", "security name"];
 const SHARES_CANDIDATES = ["quantity", "shares", "qty", "units"];
@@ -175,15 +175,22 @@ function detectBrokerage(headers: string[], csvText: string): { bankName: string
   };
 }
 
+function matchHeader(headers: string[], target: string): string {
+  // Find the actual header that matches the target (case-insensitive)
+  const lower = headers.map((h) => h.toLowerCase().trim());
+  const idx = lower.indexOf(target.toLowerCase().trim());
+  return idx !== -1 ? headers[idx] : "";
+}
+
 function resolveHeaderMap(headers: string[], overrides: Partial<HeaderMap>): HeaderMap {
   return {
-    date: overrides.date || findHeader(headers, DATE_CANDIDATES) || "",
-    action: overrides.action || findHeader(headers, ACTION_CANDIDATES) || "",
-    symbol: overrides.symbol || findHeader(headers, SYMBOL_CANDIDATES) || "",
-    description: overrides.description || findHeader(headers, DESC_CANDIDATES) || "",
-    shares: overrides.shares || findHeader(headers, SHARES_CANDIDATES) || "",
-    price: overrides.price || findHeader(headers, PRICE_CANDIDATES) || "",
-    amount: overrides.amount || findHeader(headers, AMOUNT_CANDIDATES) || "",
+    date: (overrides.date ? matchHeader(headers, overrides.date) : "") || findHeader(headers, DATE_CANDIDATES) || "",
+    action: (overrides.action ? matchHeader(headers, overrides.action) : "") || findHeader(headers, ACTION_CANDIDATES) || "",
+    symbol: (overrides.symbol ? matchHeader(headers, overrides.symbol) : "") || findHeader(headers, SYMBOL_CANDIDATES) || "",
+    description: (overrides.description ? matchHeader(headers, overrides.description) : "") || findHeader(headers, DESC_CANDIDATES) || "",
+    shares: (overrides.shares ? matchHeader(headers, overrides.shares) : "") || findHeader(headers, SHARES_CANDIDATES) || "",
+    price: (overrides.price ? matchHeader(headers, overrides.price) : "") || findHeader(headers, PRICE_CANDIDATES) || "",
+    amount: (overrides.amount ? matchHeader(headers, overrides.amount) : "") || findHeader(headers, AMOUNT_CANDIDATES) || "",
   };
 }
 

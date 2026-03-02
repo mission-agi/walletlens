@@ -63,23 +63,49 @@ function parseNumber(value: string): number {
   return isNaN(num) ? 0 : roundCents(num);
 }
 
-function parseDate(value: string): string | null {
+function parseDate(value: string, fallbackYear?: number): string | null {
   if (!value) return null;
   const cleaned = value.trim();
-  const d = new Date(cleaned);
-  if (!isNaN(d.getTime())) {
-    return d.toISOString().split("T")[0];
+  // If the value already has a full year (e.g., 12/31/2025), parse directly
+  const fullDateParts = cleaned.split(/[/-]/);
+  if (fullDateParts.length === 3 && fullDateParts[2].length >= 4) {
+    const d = new Date(cleaned);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().split("T")[0];
+    }
   }
   const parts = cleaned.split(/[/-]/);
   if (parts.length >= 2) {
     const [a, b, c] = parts;
-    const year = c ? (c.length === 2 ? `20${c}` : c) : String(new Date().getFullYear());
+    let year: string;
+    if (c) {
+      year = c.length === 2 ? `20${c}` : c;
+    } else {
+      year = String(fallbackYear || new Date().getFullYear());
+    }
     const attempt = new Date(`${year}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`);
     if (!isNaN(attempt.getTime())) {
       return attempt.toISOString().split("T")[0];
     }
   }
   return null;
+}
+
+function detectStatementYear(text: string): number | undefined {
+  // Look for patterns like "December 2025", "Statement Period: 12/01/2025 - 12/31/2025"
+  const yearPatterns = [
+    /(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i,
+    /(?:statement\s+period|period\s+ending|through|ending)\s*:?\s*\d{1,2}[/-]\d{1,2}[/-](\d{4})/i,
+    /\d{1,2}[/-]\d{1,2}[/-](\d{4})/,
+  ];
+  for (const pattern of yearPatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const year = parseInt(match[1]);
+      if (year >= 2000 && year <= 2100) return year;
+    }
+  }
+  return undefined;
 }
 
 // Detect if a PDF is an investment statement
@@ -150,9 +176,12 @@ export async function parsePDFInvestmentTransactions(buffer: Buffer, preExtracte
     const transactions: ParsedInvestmentTransaction[] = [];
     const failedRows: FailedRow[] = [];
 
+    // Try to detect statement year from surrounding text
+    const statementYear = detectStatementYear(text);
+
     const datePattern = /^(\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?)(?:\s|$)/;
     const symbolPattern = /\b([A-Z]{1,5})\b/;
-    const amountPattern = /\$?\s?-?[\d,]+\.\d{2}/g;
+    const amountPattern = /[-]?\$?\s?[\d,]+\.\d{2,}/g;
 
     let dateLineIndex = 0;
     for (const line of lines) {
@@ -160,7 +189,7 @@ export async function parsePDFInvestmentTransactions(buffer: Buffer, preExtracte
       if (!dateMatch) continue;
 
       const rawContent = line.substring(0, 200);
-      const dateStr = parseDate(dateMatch[1]);
+      const dateStr = parseDate(dateMatch[1], statementYear);
       if (!dateStr) {
         failedRows.push({ rowIndex: dateLineIndex, rawContent, reasonCode: "invalid_date", reasonMessage: "Could not parse date from PDF line" });
         dateLineIndex++;
@@ -179,12 +208,31 @@ export async function parsePDFInvestmentTransactions(buffer: Buffer, preExtracte
       const amounts: number[] = [];
       let amtMatch;
       while ((amtMatch = amountPattern.exec(line)) !== null) {
-        amounts.push(Math.abs(parseNumber(amtMatch[0])));
+        amounts.push(parseNumber(amtMatch[0]));
       }
 
-      const amount = amounts.length > 0 ? amounts[amounts.length - 1] : 0;
-      const price = amounts.length >= 2 ? amounts[amounts.length - 2] : 0;
-      const shares = amounts.length >= 3 ? amounts[0] : (price > 0 && amount > 0 ? amount / price : 0);
+      // Smart amount extraction: for "shares price amount [balance]" pattern,
+      // use the 3rd value as amount to avoid picking up trailing balance
+      let shares = 0;
+      let price = 0;
+      let amount = 0;
+
+      if (amounts.length >= 4) {
+        // Pattern: shares, price, amount, balance
+        shares = Math.abs(amounts[0]);
+        price = Math.abs(amounts[1]);
+        amount = Math.abs(amounts[2]);
+      } else if (amounts.length === 3) {
+        shares = Math.abs(amounts[0]);
+        price = Math.abs(amounts[1]);
+        amount = Math.abs(amounts[2]);
+      } else if (amounts.length === 2) {
+        price = Math.abs(amounts[0]);
+        amount = Math.abs(amounts[1]);
+        shares = price > 0 ? amount / price : 0;
+      } else if (amounts.length === 1) {
+        amount = Math.abs(amounts[0]);
+      }
 
       const description = line.replace(dateMatch[0], "").trim().substring(0, 100);
 
@@ -199,9 +247,9 @@ export async function parsePDFInvestmentTransactions(buffer: Buffer, preExtracte
         action,
         symbol,
         description,
-        shares,
-        pricePerShare: price,
-        amount,
+        shares: roundCents(shares),
+        pricePerShare: roundCents(price),
+        amount: roundCents(amount),
       });
       dateLineIndex++;
     }
