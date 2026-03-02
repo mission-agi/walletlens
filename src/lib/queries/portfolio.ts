@@ -37,10 +37,22 @@ export async function recomputeHoldings(accountId: string) {
         current.totalCost = 0;
       }
     }
-    // Dividend reinvestments
+    // Dividend reinvestments — add shares and cost
     if (tx.action === "dividend" && tx.shares > 0) {
       current.shares += tx.shares;
       current.totalCost += tx.amount;
+    }
+    // Interest earned — treat as income (adds to value but not shares for non-CASH symbols)
+    if (tx.action === "interest" && tx.amount > 0) {
+      // For cash/money market positions, interest adds shares at $1
+      if (tx.symbol === "CASH" || tx.symbol === "SPAXX" || tx.symbol === "FDRXX" || tx.symbol === "VMFXX") {
+        current.shares += tx.amount; // $1/share for money market
+        current.totalCost += tx.amount;
+      }
+    }
+    // Fees reduce cost basis
+    if (tx.action === "fee" && tx.amount > 0) {
+      current.totalCost += tx.amount; // fee increases cost basis (reduces gains)
     }
 
     if (tx.pricePerShare > 0) {
@@ -194,6 +206,15 @@ export async function getPortfolioPerformanceTimeline(userId?: string) {
     }
     if (tx.action === "dividend" && tx.shares > 0) {
       current.shares += tx.shares;
+      current.totalCost += tx.amount;
+    }
+    if (tx.action === "interest" && tx.amount > 0) {
+      if (tx.symbol === "CASH" || tx.symbol === "SPAXX" || tx.symbol === "FDRXX" || tx.symbol === "VMFXX") {
+        current.shares += tx.amount;
+        current.totalCost += tx.amount;
+      }
+    }
+    if (tx.action === "fee" && tx.amount > 0) {
       current.totalCost += tx.amount;
     }
     if (tx.pricePerShare > 0) {
