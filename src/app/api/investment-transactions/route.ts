@@ -46,6 +46,10 @@ export const POST = withLogging(async function POST(request: Request) {
 
   const { accountId, bankName, accountLabel, accountType, filename, transactions } = parsed.data;
 
+  if (transactions.length === 0) {
+    return safeError("At least one transaction is required.");
+  }
+
   // Resolve account
   let resolvedAccountId = accountId;
 
