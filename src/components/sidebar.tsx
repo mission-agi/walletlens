@@ -10,7 +10,6 @@ import {
   TrendingUp,
   Users,
   Settings,
-  Bug,
 } from "lucide-react";
 import { NavLink } from "./nav-link";
 import { ProfileSwitcher } from "./profile/profile-switcher";

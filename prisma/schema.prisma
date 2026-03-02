@@ -116,3 +116,15 @@ model AppConfig {
   key   String @id
   value String
 }
+
+model Feedback {
+  id          String   @id @default(cuid())
+  installId   String
+  description String
+  pageUrl     String?
+  userAgent   String?
+  consoleLogs String?
+  screenshot  String?
+  status      String   @default("new")
+  createdAt   DateTime @default(now())
+}

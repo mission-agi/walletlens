@@ -2,35 +2,51 @@ import { NextResponse } from "next/server";
 import { withLogging } from "@/lib/api-logger";
 import { checkRateLimit, safeError } from "@/lib/security";
 import { getInstallId } from "@/lib/install-id";
-import { log } from "@/lib/logger";
+import { prisma } from "@/lib/db";
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN ?? "";
-const FEEDBACK_REPO = process.env.NEXT_PUBLIC_GITHUB_FEEDBACK_REPO ?? "";
+const GOOGLE_FORM_ID = "1FAIpQLSf_aqj_cLk0wfGV41k5osuLfP4Z_pcQ-SA7ApzdDQj-nviQ5w";
+const FORM_FIELDS = {
+  description: "entry.1578104676",
+  installId: "entry.1193686228",
+  pageUrl: "entry.2110467078",
+  userAgent: "entry.688108414",
+  consoleLogs: "entry.823830068",
+};
 
-async function handler(req: Request) {
-  // Rate limit: max 5 feedback submissions per minute per IP
-  const rateLimitResult = checkRateLimit(req, "feedback", 5, 60_000);
-  if (rateLimitResult) return rateLimitResult;
-
-  if (!GITHUB_TOKEN) {
-    return NextResponse.json(
-      { error: "Feedback is not configured. Set GITHUB_TOKEN in your environment." },
-      { status: 503 }
-    );
-  }
-
-  if (!FEEDBACK_REPO) {
-    return NextResponse.json(
-      { error: "Feedback repo is not configured. Set NEXT_PUBLIC_GITHUB_FEEDBACK_REPO." },
-      { status: 503 }
-    );
+async function submitToGoogleForm(data: Record<string, string>): Promise<boolean> {
+  const params = new URLSearchParams();
+  for (const [key, entryId] of Object.entries(FORM_FIELDS)) {
+    if (data[key]) {
+      params.set(entryId, data[key]);
+    }
   }
 
   try {
+    const res = await fetch(
+      `https://docs.google.com/forms/d/e/${GOOGLE_FORM_ID}/formResponse`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      }
+    );
+    // Google Forms returns 200 on success (even for invalid entries)
+    return res.ok;
+  } catch {
+    // Don't fail the whole request if Google Form submission fails
+    // The feedback is already saved locally
+    return false;
+  }
+}
+
+async function handler(req: Request) {
+  const rateLimitResult = checkRateLimit(req, "feedback", 10, 60_000);
+  if (rateLimitResult) return rateLimitResult;
+
+  try {
     const body = await req.json();
-    const { description, screenshotBase64, consoleLogs, pageUrl, userAgent } = body as {
+    const { description, consoleLogs, pageUrl, userAgent } = body as {
       description?: string;
-      screenshotBase64?: string;
       consoleLogs?: string;
       pageUrl?: string;
       userAgent?: string;
@@ -41,123 +57,36 @@ async function handler(req: Request) {
     }
 
     const installId = await getInstallId();
-    const timestamp = new Date().toISOString();
 
-    // Upload screenshot to repo if provided
-    let screenshotUrl = "";
-    if (screenshotBase64) {
-      try {
-        const screenshotPath = `feedback-screenshots/${installId}-${Date.now()}.png`;
-        const uploadRes = await fetch(
-          `https://api.github.com/repos/${FEEDBACK_REPO}/contents/${screenshotPath}`,
-          {
-            method: "PUT",
-            headers: {
-              Authorization: `Bearer ${GITHUB_TOKEN}`,
-              Accept: "application/vnd.github+json",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              message: `feedback screenshot from ${installId}`,
-              content: screenshotBase64,
-            }),
-          }
-        );
+    // Save feedback locally (temporary, until Google Form submission succeeds)
+    const feedback = await prisma.feedback.create({
+      data: {
+        installId,
+        description: description.trim(),
+        pageUrl: pageUrl || null,
+        userAgent: userAgent || null,
+        consoleLogs: consoleLogs || null,
+      },
+    });
 
-        if (uploadRes.ok) {
-          const uploadData = (await uploadRes.json()) as {
-            content?: { download_url?: string };
-          };
-          screenshotUrl = uploadData.content?.download_url ?? "";
-        } else {
-          log.api.warn("[feedback] Failed to upload screenshot", {
-            status: uploadRes.status,
-          });
-        }
-      } catch (uploadErr) {
-        log.api.warn("[feedback] Screenshot upload error", {
-          error: uploadErr instanceof Error ? uploadErr.message : "unknown",
-        });
-      }
-    }
-
-    // Build issue body
-    const screenshotSection = screenshotUrl
-      ? `## Screenshot\n![screenshot](${screenshotUrl})`
-      : "## Screenshot\n_No screenshot captured._";
-
-    const logsSection = consoleLogs
-      ? `## Console Logs\n\`\`\`text\n${consoleLogs.slice(0, 3000)}\n\`\`\``
-      : "## Console Logs\n_No logs captured._";
-
-    const issueBody = [
-      `## Description`,
-      description.trim(),
-      "",
-      screenshotSection,
-      "",
-      `## Environment`,
-      `- **Install ID**: \`${installId}\``,
-      `- **URL**: ${pageUrl || "N/A"}`,
-      `- **User Agent**: ${userAgent || "N/A"}`,
-      `- **Timestamp**: ${timestamp}`,
-      "",
-      logsSection,
-    ].join("\n");
-
-    // Build title from first line of description
-    const firstLine = description.trim().split("\n")[0] || "Feedback";
-    const titleCompact = firstLine.replace(/\s+/g, " ").trim();
-    const title = titleCompact.length > 80
-      ? `[${installId}] ${titleCompact.slice(0, 80)}...`
-      : `[${installId}] ${titleCompact}`;
-
-    // Create GitHub issue
-    const issueRes = await fetch(
-      `https://api.github.com/repos/${FEEDBACK_REPO}/issues`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${GITHUB_TOKEN}`,
-          Accept: "application/vnd.github+json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          title,
-          body: issueBody,
-          labels: ["bug", "feedback"],
-        }),
-      }
-    );
-
-    if (!issueRes.ok) {
-      const errText = await issueRes.text();
-      log.api.error("[feedback] GitHub issue creation failed", {
-        status: issueRes.status,
-        body: errText.slice(0, 500),
-      });
-      return NextResponse.json(
-        { error: "Failed to create feedback issue." },
-        { status: 502 }
-      );
-    }
-
-    const issueData = (await issueRes.json()) as {
-      html_url?: string;
-      number?: number;
-    };
-
-    log.api.info("[feedback] Issue created", {
+    // Submit to Google Form in the background (server-side, no popup)
+    const googleFormSubmitted = await submitToGoogleForm({
+      description: description.trim(),
       installId,
-      issue: issueData.number,
-      url: issueData.html_url,
+      pageUrl: pageUrl || "",
+      userAgent: userAgent || "",
+      consoleLogs: (consoleLogs || "").slice(0, 2000),
     });
 
-    return NextResponse.json({
-      success: true,
-      issueUrl: issueData.html_url,
-      issueNumber: issueData.number,
-    });
+    // If Google Form submission succeeded, delete the local copy
+    // No need to store data locally once it's been delivered
+    if (googleFormSubmitted) {
+      await prisma.feedback.delete({ where: { id: feedback.id } }).catch(() => {
+        // Non-critical — local cleanup failure shouldn't affect the response
+      });
+    }
+
+    return NextResponse.json({ success: true, googleFormSubmitted });
   } catch (err) {
     return safeError("Failed to submit feedback", 500, err);
   }
