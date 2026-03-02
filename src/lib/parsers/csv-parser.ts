@@ -2,11 +2,11 @@ import Papa from "papaparse";
 import type { ParsedTransaction, ParsedResult, FailedRow, ParseResult } from "./index";
 import { roundCents } from "@/lib/utils";
 
-const DATE_HEADERS = ["date", "transaction date", "posting date", "posted date", "trans date"];
+const DATE_HEADERS = ["date", "transaction date", "posting date", "posted date", "trans date", "trans. date"];
 const DESC_HEADERS = ["description", "memo", "narrative", "details", "transaction description", "name", "payee", "merchant"];
 const AMOUNT_HEADERS = ["amount", "transaction amount"];
-const DEBIT_HEADERS = ["debit", "withdrawal", "debit amount"];
-const CREDIT_HEADERS = ["credit", "deposit", "credit amount"];
+const DEBIT_HEADERS = ["debit", "withdrawal", "withdrawals", "debit amount"];
+const CREDIT_HEADERS = ["credit", "deposit", "deposits", "credit amount"];
 
 function findHeader(headers: string[], candidates: string[]): string | null {
   const lower = headers.map((h) => h.toLowerCase().trim());
