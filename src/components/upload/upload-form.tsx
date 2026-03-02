@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, FileText, Check, X, TrendingUp, AlertTriangle, Plus } from "lucide-react";
+import { diag } from "@/lib/diagnostics";
 
 interface CategorizedTransaction {
   date: string;
@@ -94,9 +95,16 @@ export function UploadForm({ categories }: Props) {
   const hasBankFiles = fileMetas.some((m) => !m.isInvestment);
 
   function addFiles(newFiles: FileList | File[]) {
-    const arr = Array.from(newFiles).filter(
+    const allFiles = Array.from(newFiles);
+    const arr = allFiles.filter(
       (f) => f.name.toLowerCase().endsWith(".csv") || f.name.toLowerCase().endsWith(".pdf")
     );
+    // Log rejected files
+    for (const f of allFiles) {
+      if (!arr.includes(f)) {
+        diag.fileRejected(f.name, "Only CSV and PDF files are supported");
+      }
+    }
     setFiles((prev) => [...prev, ...arr]);
   }
 
@@ -127,15 +135,26 @@ export function UploadForm({ categories }: Props) {
       while (nextIndex < files.length) {
         const fileIndex = nextIndex++;
         const file = files[fileIndex];
+        diag.uploadStart(file.name, file.size);
         try {
           const formData = new FormData();
           formData.append("file", file);
           const res = await fetch("/api/upload", { method: "POST", body: formData });
           const data = await res.json();
           if (!res.ok) {
+            diag.uploadResult(file.name, false, data.error);
             errors.push(`${file.name}: ${data.error || "Failed"}`);
             failedCount++;
           } else {
+            const txCount = (data.transactions?.length || 0) + (data.investmentTransactions?.length || 0);
+            const failedRowCount = data.failedRows?.length || 0;
+            diag.uploadResult(file.name, true);
+            // Collect unique reason codes from failed rows
+            const reasonCodes = failedRowCount > 0
+              ? [...new Set((data.failedRows as { reasonCode?: string }[]).map((r) => r.reasonCode).filter(Boolean))] as string[]
+              : undefined;
+            diag.parseResult(file.name, txCount, failedRowCount, reasonCodes);
+
             metas.push({
               filename: data.filename,
               bankName: data.bankName,
@@ -159,6 +178,7 @@ export function UploadForm({ categories }: Props) {
             }
           }
         } catch {
+          diag.uploadResult(file.name, false, "Network error");
           errors.push(`${file.name}: Upload failed`);
           failedCount++;
         }
@@ -338,8 +358,14 @@ export function UploadForm({ categories }: Props) {
               }
             }
           }
+          const txCount = meta.isInvestment
+            ? investmentTransactions.filter((t) => t._fileIndex === fileIndex).length
+            : transactions.filter((t) => t._fileIndex === fileIndex).length;
+          diag.saveResult(meta.filename, true, txCount);
         } catch (err) {
-          saveErrors.push(err instanceof Error ? err.message : `Failed to save ${meta.filename}`);
+          const errMsg = err instanceof Error ? err.message : `Failed to save ${meta.filename}`;
+          diag.saveResult(meta.filename, false, undefined, errMsg);
+          saveErrors.push(errMsg);
           failedCount++;
         }
 
